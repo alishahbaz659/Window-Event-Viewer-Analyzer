@@ -59,6 +59,7 @@ def preprocess_logs(df):
     
     return df
 
+
 # Function to identify relevant Event IDs based on Source
 def identify_event_ids(df):
     relevant_sources = ['Outlook', 'Teams', 'WinWord', 'PowerPoint', 'MicrosoftEdge', 'Excel']
@@ -102,32 +103,50 @@ def process_logs(df):
             activity_data[user].append((timestamp, category))
     return activity_data
 
-# Function to calculate activity
+# Function to calculate activity summary
 def calculate_activity(activity_data):
     activity_summary = {}
     for user, events in activity_data.items():
         daily_activity = {}
-        login_time = None
-        lock_time = None
+        activity_timers = {  # Dictionary to store timers for specific activities
+            'Logon': None, 'Logoff': None, 'Lock': None, 'Unlock': None,
+            'Session Connect': None, 'Session Disconnect': None,
+            'Outlook Event': None, 'Teams Event': None, 'WinWord Event': None,
+            'PowerPoint Event': None, 'MicrosoftEdge Event': None, 'Excel Event': None
+        }
+        
         for timestamp, category in events:
             date = timestamp.date()
+            
+            # Initialize daily activity if not already initialized
             if date not in daily_activity:
                 daily_activity[date] = timedelta()
             
-            if category == 'Logon' or category == 'Session Connect':
-                login_time = timestamp
-            elif category == 'Logoff' or category == 'Session Disconnect':
-                if login_time:
-                    daily_activity[date] += timestamp - login_time
-                    login_time = None
+            # Handle specific activities
+            if category in ['Logon', 'Session Connect']:
+                activity_timers['Logon'] = timestamp
+            elif category in ['Logoff', 'Session Disconnect']:
+                if activity_timers['Logon']:
+                    daily_activity[date] += timestamp - activity_timers['Logon']
+                    activity_timers['Logon'] = None
             elif category == 'Lock':
-                lock_time = timestamp
+                activity_timers['Lock'] = timestamp
             elif category == 'Unlock':
-                if lock_time:
-                    daily_activity[date] -= timestamp - lock_time
-                    lock_time = None
+                if activity_timers['Lock']:
+                    daily_activity[date] -= timestamp - activity_timers['Lock']
+                    activity_timers['Lock'] = None
+            elif category in ['Outlook Event', 'Teams Event', 'WinWord Event', 'PowerPoint Event', 
+                              'MicrosoftEdge Event', 'Excel Event']:
+                if activity_timers[category] is None:
+                    activity_timers[category] = timestamp
+                else:
+                    daily_activity[date] += timestamp - activity_timers[category]
+                    activity_timers[category] = None
         
-        activity_summary[user] = {date: min(activity, timedelta(hours=7)) for date, activity in daily_activity.items()}
+        # Calculate total hours for each day
+        activity_hours = {date: activity.total_seconds() / 3600 for date, activity in daily_activity.items()}
+        
+        activity_summary[user] = activity_hours
     
     return activity_summary
 
@@ -135,15 +154,15 @@ def calculate_activity(activity_data):
 def display_activity(activity_summary):
     for user, daily_activity in activity_summary.items():
         dates = list(daily_activity.keys())
-        hours = [activity.total_seconds() / 3600 for activity in daily_activity.values()]
+        hours = list(daily_activity.values())
         
-        plt.figure(figsize=(10, 5))
-        plt.bar(dates, hours)
-        plt.axhline(y=7, color='r', linestyle='-')
+        plt.figure(figsize=(12, 6))
+        plt.bar(dates, hours, width=0.8)
         plt.xlabel('Date')
-        plt.ylabel('Active Hours')
+        plt.ylabel('Hours')
         plt.title(f'User Activity for {user}')
         plt.xticks(rotation=45)
+        plt.tight_layout()
         plt.show()
 
 # Function to open files and process logs
@@ -161,6 +180,7 @@ def open_files():
             
             activity_data = process_logs(df)
             activity_summary = calculate_activity(activity_data)
+    
             display_activity(activity_summary)
         except Exception as e:
             print(f"Error processing files: {e}")
