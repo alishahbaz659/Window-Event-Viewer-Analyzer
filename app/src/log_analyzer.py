@@ -62,7 +62,7 @@ def preprocess_logs(df):
 
 # Function to identify relevant Event IDs based on Source
 def identify_event_ids(df):
-    relevant_sources = ['Outlook', 'Teams', 'WinWord', 'PowerPoint', 'MicrosoftEdge', 'Excel']
+    relevant_sources = ['Outlook', 'Teams', 'WinWord', 'PowerPoint', 'MicrosoftEdge', 'Excel', 'Chrome', 'ESENT']
     relevant_event_ids = df[df['Source'].isin(relevant_sources)]['Event ID'].unique()
     return relevant_event_ids
 
@@ -80,7 +80,7 @@ def categorize_event(source, event_id):
         return 'Session Connect'
     elif event_id == 4779:
         return 'Session Disconnect'
-    elif source in ['Outlook', 'Teams', 'WinWord', 'PowerPoint', 'MicrosoftEdge', 'Excel']:
+    elif source in ['Outlook', 'Teams', 'WinWord', 'PowerPoint', 'MicrosoftEdge', 'Excel', 'Chrome', 'ESENT']:
         return f'{source} Event'
     return 'Other'
 
@@ -99,7 +99,7 @@ def process_logs(df):
         
         if category in ['Logon', 'Logoff', 'Lock', 'Unlock', 'Session Connect', 'Session Disconnect', 
                         'Outlook Event', 'Teams Event', 'WinWord Event', 'PowerPoint Event', 
-                        'MicrosoftEdge Event', 'Excel Event']:
+                        'MicrosoftEdge Event', 'Excel Event', 'Chrome Event', 'ESENT Event']:
             activity_data[user].append((timestamp, category))
     return activity_data
 
@@ -112,7 +112,7 @@ def calculate_activity(activity_data):
             'Logon': None, 'Logoff': None, 'Lock': None, 'Unlock': None,
             'Session Connect': None, 'Session Disconnect': None,
             'Outlook Event': None, 'Teams Event': None, 'WinWord Event': None,
-            'PowerPoint Event': None, 'MicrosoftEdge Event': None, 'Excel Event': None
+            'PowerPoint Event': None, 'MicrosoftEdge Event': None, 'Excel Event': None, 'Chrome Event': None, 'ESENT Event': None,
         }
         
         for timestamp, category in events:
@@ -120,48 +120,66 @@ def calculate_activity(activity_data):
             
             # Initialize daily activity if not already initialized
             if date not in daily_activity:
-                daily_activity[date] = timedelta()
+                daily_activity[date] = {cat: timedelta() for cat in activity_timers}
             
             # Handle specific activities
             if category in ['Logon', 'Session Connect']:
                 activity_timers['Logon'] = timestamp
             elif category in ['Logoff', 'Session Disconnect']:
                 if activity_timers['Logon']:
-                    daily_activity[date] += timestamp - activity_timers['Logon']
+                    daily_activity[date]['Logon'] += timestamp - activity_timers['Logon']
                     activity_timers['Logon'] = None
             elif category == 'Lock':
                 activity_timers['Lock'] = timestamp
             elif category == 'Unlock':
                 if activity_timers['Lock']:
-                    daily_activity[date] -= timestamp - activity_timers['Lock']
+                    daily_activity[date]['Lock'] += timestamp - activity_timers['Lock']
                     activity_timers['Lock'] = None
             elif category in ['Outlook Event', 'Teams Event', 'WinWord Event', 'PowerPoint Event', 
-                              'MicrosoftEdge Event', 'Excel Event']:
+                              'MicrosoftEdge Event', 'Excel Event', 'Chrome Event', 'ESENT Event']:
                 if activity_timers[category] is None:
                     activity_timers[category] = timestamp
                 else:
-                    daily_activity[date] += timestamp - activity_timers[category]
+                    daily_activity[date][category] += timestamp - activity_timers[category]
                     activity_timers[category] = None
         
         # Calculate total hours for each day
-        activity_hours = {date: activity.total_seconds() / 3600 for date, activity in daily_activity.items()}
+        activity_hours = {date: {cat: activity.total_seconds() / 3600 for cat, activity in activities.items()} for date, activities in daily_activity.items()}
         
         activity_summary[user] = activity_hours
     
     return activity_summary
 
+
 # Function to display activity
 def display_activity(activity_summary):
     for user, daily_activity in activity_summary.items():
         dates = list(daily_activity.keys())
-        hours = list(daily_activity.values())
+        categories = list(daily_activity[dates[0]].keys())  # Get categories from the first date
         
+        # Prepare data for plotting
+        data = {cat: [] for cat in categories}
+        for date in dates:
+            for cat in categories:
+                data[cat].append(daily_activity[date][cat] if cat in daily_activity[date] else 0)
+        
+        # Plotting the stacked bar chart
         plt.figure(figsize=(12, 6))
-        plt.bar(dates, hours, width=0.8)
+        x_indexes = range(len(dates))
+        
+        bottom = None
+        for cat in categories:
+            plt.bar(x_indexes, [data[cat][i] for i in range(len(dates))], label=cat, bottom=bottom)
+            if bottom is None:
+                bottom = [data[cat][i] for i in range(len(dates))]
+            else:
+                bottom = [bottom[i] + data[cat][i] for i in range(len(dates))]
+        
         plt.xlabel('Date')
         plt.ylabel('Hours')
-        plt.title(f'User Activity for {user}')
-        plt.xticks(rotation=45)
+        plt.title(f'Stacked User Activity for {user}')
+        plt.xticks(x_indexes, dates, rotation=45)
+        plt.legend()
         plt.tight_layout()
         plt.show()
 
@@ -180,7 +198,6 @@ def open_files():
             
             activity_data = process_logs(df)
             activity_summary = calculate_activity(activity_data)
-    
             display_activity(activity_summary)
         except Exception as e:
             print(f"Error processing files: {e}")
