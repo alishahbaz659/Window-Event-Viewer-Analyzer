@@ -2,12 +2,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import tkinter as tk
-from tkinter import filedialog, ttk,filedialog, Canvas, PhotoImage, messagebox
+from tkinter import filedialog, filedialog, Canvas, PhotoImage, messagebox
 from Evtx.Evtx import Evtx
 import xml.etree.ElementTree as ET
 import customtkinter as ctk
 import os
 import threading
+import ttkbootstrap as ttk
+from ttkbootstrap.dialogs import Messagebox
 
 # Function to read EVTX files and extract relevant data
 def read_evtx(files):
@@ -194,6 +196,41 @@ def display_activity(activity_summary):
         plt.tight_layout()
         plt.show()
 
+# Function to show loading dialog
+def show_loading_dialog():
+    loading_dialog = tk.Toplevel(root)
+    loading_dialog.geometry("300x100")
+    loading_dialog.title("Loading")
+    label = ctk.CTkLabel(loading_dialog, text="Loading, please wait...", font=("Helvetica", 14))
+    label.pack(expand=True)
+
+    return loading_dialog
+
+# Function to process files in a background thread
+def process_files_in_background(files):
+    global loading_dialog
+
+    # Show loading dialog
+    loading_dialog = show_loading_dialog()
+
+    try:
+        dataframes = [read_evtx([file]) for file in files]
+        combined_df = pd.concat(dataframes, ignore_index=True)
+        df = preprocess_logs(combined_df)
+
+        # Identify relevant Event IDs
+        relevant_event_ids = identify_event_ids(df)
+        print(f"Relevant Event IDs: {relevant_event_ids}")
+
+        activity_data = process_logs(df)
+        activity_summary = calculate_activity(activity_data)
+        display_activity(activity_summary)
+    except Exception as e:
+        print(f"Error processing files: {e}")
+    finally:
+        # Hide loading label after processing
+        loading_dialog.destroy()
+
 # Function to open files and process logs
 def open_files():
     files = filedialog.askopenfilenames(filetypes=[("EVTX files", "*.evtx")])
@@ -201,26 +238,14 @@ def open_files():
     if len(files) > 3:
         messagebox.showerror("Error", "Please select a maximum of 3 files.")
         return
-    
+
     if files:
         filenames = [os.path.basename(file) for file in files]  # Extract file names
         file_label.configure(text="Selected files: " + "  ,  ".join(filenames))
+        root.update_idletasks()  # Update the GUI immediately
+        # Start background processing
+        threading.Thread(target=process_files_in_background, args=(files,)).start()
 
-        try:
-            dataframes = [read_evtx([file]) for file in files]
-            combined_df = pd.concat(dataframes, ignore_index=True)
-            df = preprocess_logs(combined_df)
-            
-            # Identify relevant Event IDs
-            relevant_event_ids = identify_event_ids(df)
-            print(f"Relevant Event IDs: {relevant_event_ids}")
-            
-            activity_data = process_logs(df)
-            activity_summary = calculate_activity(activity_data)
-    
-            display_activity(activity_summary)
-        except Exception as e:
-            print(f"Error processing files: {e}")
 
 # Setting up the GUI
 def cancel_action():
