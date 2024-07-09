@@ -2,9 +2,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import filedialog, ttk,filedialog, Canvas, PhotoImage, messagebox
 from Evtx.Evtx import Evtx
 import xml.etree.ElementTree as ET
+import customtkinter as ctk
+import os
+import threading
 
 # Function to read EVTX files and extract relevant data
 def read_evtx(files):
@@ -194,7 +197,15 @@ def display_activity(activity_summary):
 # Function to open files and process logs
 def open_files():
     files = filedialog.askopenfilenames(filetypes=[("EVTX files", "*.evtx")])
+
+    if len(files) > 3:
+        messagebox.showerror("Error", "Please select a maximum of 3 files.")
+        return
+    
     if files:
+        filenames = [os.path.basename(file) for file in files]  # Extract file names
+        file_label.configure(text="Selected files: " + "  ,  ".join(filenames))
+
         try:
             dataframes = [read_evtx([file]) for file in files]
             combined_df = pd.concat(dataframes, ignore_index=True)
@@ -212,13 +223,40 @@ def open_files():
             print(f"Error processing files: {e}")
 
 # Setting up the GUI
-root = tk.Tk()
-root.title("Activity Tracker")
+def cancel_action():
+    root.destroy()
 
-frame = ttk.Frame(root, padding="10")
-frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+# Initialize the main window
+root = ctk.CTk()
+root.geometry("800x500")
+ctk.set_appearance_mode("light")
+root.title("Activity Analyser")
 
-open_button = ttk.Button(frame, text="Open Log Files", command=open_files)
-open_button.grid(row=0, column=0, pady=10)
+# Create and place widgets
+title_label = ctk.CTkLabel(root, text="User Activity Analyser", font=("Helvetica", 20))
+title_label.pack(pady=50)
+
+# Create a canvas for the dashed frame
+canvas_frame = ctk.CTkFrame(root, width=500, height=150)
+canvas_frame.pack(pady=10)
+canvas = Canvas(canvas_frame, width=500, height=270, highlightthickness=1)
+canvas.pack()
+canvas.create_rectangle(5, 5, 495, 265, outline="#A9A9A9", dash=(5, 5))  # Dashed border
+
+# Upload icon
+upload_icon = PhotoImage(file="./icons/upload_file_icon.png")  # Ensure this file is in the same directory
+upload_icon = upload_icon.subsample(6, 6)
+
+# Place the upload icon and text in the canvas
+canvas.create_image(250, 70, image=upload_icon)
+
+canvas.create_text(250, 150, text="Choose files to analyse\n\nSupported formats: EVTx", fill="gray", font=("Helvetica", 12), justify="center")
+
+# Use a window in the canvas to place the button
+upload_button = ctk.CTkButton(canvas, text="Choose file", command=open_files)
+canvas.create_window(250, 230, window=upload_button, anchor="center")
+
+file_label = ctk.CTkLabel(root, text="")
+file_label.pack(pady=10)
 
 root.mainloop()
