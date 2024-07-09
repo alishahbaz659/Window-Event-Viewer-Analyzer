@@ -42,7 +42,6 @@ def read_evtx(files):
     df = pd.DataFrame(data)
     return df
 
-
 # Function to preprocess logs
 def preprocess_logs(df):
     # Drop rows with any NaN values
@@ -57,8 +56,11 @@ def preprocess_logs(df):
     # Convert 'Event ID' to integer
     df['Event ID'] = df['Event ID'].astype(int)
     
+    # Filter events between 7 AM and 7 PM
+    df = df[(df['Date and Time'].dt.time >= datetime.strptime('07:00', '%H:%M').time()) &
+            (df['Date and Time'].dt.time <= datetime.strptime('19:00', '%H:%M').time())]
+    
     return df
-
 
 # Function to identify relevant Event IDs based on Source
 def identify_event_ids(df):
@@ -127,29 +129,38 @@ def calculate_activity(activity_data):
                 activity_timers['Logon'] = timestamp
             elif category in ['Logoff', 'Session Disconnect']:
                 if activity_timers['Logon']:
-                    daily_activity[date]['Logon'] += timestamp - activity_timers['Logon']
+                    duration = timestamp - activity_timers['Logon']
+                    daily_activity[date]['Logon'] += duration
                     activity_timers['Logon'] = None
             elif category == 'Lock':
                 activity_timers['Lock'] = timestamp
             elif category == 'Unlock':
                 if activity_timers['Lock']:
-                    daily_activity[date]['Lock'] += timestamp - activity_timers['Lock']
+                    duration = timestamp - activity_timers['Lock']
+                    daily_activity[date]['Lock'] += duration
                     activity_timers['Lock'] = None
             elif category in ['Outlook Event', 'Teams Event', 'WinWord Event', 'PowerPoint Event', 
                               'MicrosoftEdge Event', 'Excel Event', 'Chrome Event', 'ESENT Event']:
                 if activity_timers[category] is None:
                     activity_timers[category] = timestamp
                 else:
-                    daily_activity[date][category] += timestamp - activity_timers[category]
+                    duration = timestamp - activity_timers[category]
+                    daily_activity[date][category] += duration
                     activity_timers[category] = None
         
-        # Calculate total hours for each day
-        activity_hours = {date: {cat: activity.total_seconds() / 3600 for cat, activity in activities.items()} for date, activities in daily_activity.items()}
+        # Cap total hours to 7 hours per day and exclude idle time
+        activity_hours = {}
+        for date, activities in daily_activity.items():
+            total_active_time = sum(activity.total_seconds() for activity in activities.values()) / 3600
+            if total_active_time > 7:
+                factor = 7 / total_active_time
+                for category in activities:
+                    activities[category] *= factor
+            activity_hours[date] = {cat: min(activity.total_seconds() / 3600, 7) for cat, activity in activities.items()}
         
         activity_summary[user] = activity_hours
     
     return activity_summary
-
 
 # Function to display activity
 def display_activity(activity_summary):
@@ -167,13 +178,10 @@ def display_activity(activity_summary):
         plt.figure(figsize=(12, 6))
         x_indexes = range(len(dates))
         
-        bottom = None
+        bottom = [0] * len(dates)
         for cat in categories:
             plt.bar(x_indexes, [data[cat][i] for i in range(len(dates))], label=cat, bottom=bottom)
-            if bottom is None:
-                bottom = [data[cat][i] for i in range(len(dates))]
-            else:
-                bottom = [bottom[i] + data[cat][i] for i in range(len(dates))]
+            bottom = [bottom[i] + data[cat][i] for i in range(len(dates))]
         
         plt.xlabel('Date')
         plt.ylabel('Hours')
@@ -198,6 +206,7 @@ def open_files():
             
             activity_data = process_logs(df)
             activity_summary = calculate_activity(activity_data)
+    
             display_activity(activity_summary)
         except Exception as e:
             print(f"Error processing files: {e}")
