@@ -2,16 +2,15 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import tkinter as tk
-from tkinter import filedialog, filedialog, Canvas, PhotoImage, messagebox
+from tkinter import filedialog, ttk,filedialog, Canvas, PhotoImage, messagebox
 from Evtx.Evtx import Evtx
 import xml.etree.ElementTree as ET
 import customtkinter as ctk
 import os
 import threading
-import ttkbootstrap as ttk
-from ttkbootstrap.dialogs import Messagebox
+import sys
 
-# Function to read EVTX files and extract relevant data
+
 def read_evtx(files):
     data = []
     namespace = {
@@ -20,32 +19,51 @@ def read_evtx(files):
     
     for file in files:
         print(f"Reading file: {file}")
-        with Evtx(file) as log:
-            for record in log.records():
-                xml_str = record.xml()
-                root = ET.fromstring(xml_str)
+        try:
+            with Evtx(file) as log:
+                has_records = False  # Flag to check if there are any records in the file
+                for record in log.records():
+                    xml_str = record.xml()
+                    root = ET.fromstring(xml_str)
 
-                try:
-                    system = root.find('.//ns:System', namespaces=namespace)
-                    level = system.find('.//ns:Level', namespaces=namespace)
-                    date_time = system.find('.//ns:TimeCreated', namespaces=namespace)
-                    source = system.find('.//ns:Provider', namespaces=namespace)
-                    event_id = system.find('.//ns:EventID', namespaces=namespace)
-                    task_category = system.find('.//ns:Task', namespaces=namespace)
+                    try:
+                        system = root.find('.//ns:System', namespaces=namespace)
+                        level = system.find('.//ns:Level', namespaces=namespace)
+                        date_time = system.find('.//ns:TimeCreated', namespaces=namespace)
+                        source = system.find('.//ns:Provider', namespaces=namespace)
+                        event_id = system.find('.//ns:EventID', namespaces=namespace)
+                        task_category = system.find('.//ns:Task', namespaces=namespace)
 
-                    data.append({
-                        "Level": level.text if level is not None else None,
-                        "Date and Time": date_time.attrib['SystemTime'] if date_time is not None and 'SystemTime' in date_time.attrib else None,
-                        "Source": source.attrib['Name'] if source is not None and 'Name' in source.attrib else None,
-                        "Event ID": event_id.text if event_id is not None else None,
-                        "Task Category": task_category.text if task_category is not None else None
-                    })
-                except Exception as e:
-                    print(f"Error processing record: {e}")
-                    continue
+                        data.append({
+                            "Level": level.text if level is not None else None,
+                            "Date and Time": date_time.attrib['SystemTime'] if date_time is not None and 'SystemTime' in date_time.attrib else None,
+                            "Source": source.attrib['Name'] if source is not None and 'Name' in source.attrib else None,
+                            "Event ID": event_id.text if event_id is not None else None,
+                            "Task Category": task_category.text if task_category is not None else None
+                        })
+                        has_records = True
+                    except Exception as e:
+                        print(f"Error processing record: {e}")
+                        continue
+                
+                if not has_records:
+                    print(f"File {file} does not contain valid records.")
+                    if loading_dialog:
+                        loading_dialog.destroy()
+                    return None
+        except Exception as e:
+            print(f"Error reading file {file}")
+            if loading_dialog:
+                loading_dialog.destroy()
+            return None
+
+    if not data:
+        print(f"No valid records found in any file.")
+        return None
 
     df = pd.DataFrame(data)
-    return df
+    return df if not df.empty else None
+
 
 # Function to preprocess logs
 def preprocess_logs(df):
@@ -167,54 +185,71 @@ def calculate_activity(activity_data):
     
     return activity_summary
 
-# Function to display activity
+# Updated display_activity function
 def display_activity(activity_summary):
-    for user, daily_activity in activity_summary.items():
-        dates = list(daily_activity.keys())
-        categories = list(daily_activity[dates[0]].keys())  # Get categories from the first date
-        
-        # Prepare data for plotting
-        data = {cat: [] for cat in categories}
-        for date in dates:
-            for cat in categories:
-                data[cat].append(daily_activity[date][cat] if cat in daily_activity[date] else 0)
-        
-        # Plotting the stacked bar chart
-        plt.figure(figsize=(12, 6))
-        x_indexes = range(len(dates))
-        
-        bottom = [0] * len(dates)
-        for cat in categories:
-            plt.bar(x_indexes, [data[cat][i] for i in range(len(dates))], label=cat, bottom=bottom)
-            bottom = [bottom[i] + data[cat][i] for i in range(len(dates))]
-        
-        plt.xlabel('Date')
-        plt.ylabel('Hours')
-        plt.title(f'Stacked User Activity for {user}')
-        plt.xticks(x_indexes, dates, rotation=45)
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
+    def plot_activity():
+        for user, daily_activity in activity_summary.items():
+            dates = list(daily_activity.keys())
+            categories = list(daily_activity[dates[0]].keys())  # Get categories from the first date
 
-# Function to show loading dialog
+            # Prepare data for plotting
+            data = {cat: [] for cat in categories}
+            for date in dates:
+                for cat in categories:
+                    data[cat].append(daily_activity[date][cat] if cat in daily_activity[date] else 0)
+
+            # Plotting the stacked bar chart
+            plt.figure(figsize=(12, 6))
+            x_indexes = range(len(dates))
+
+            bottom = [0] * len(dates)
+            for cat in categories:
+                plt.bar(x_indexes, [data[cat][i] for i in range(len(dates))], label=cat, bottom=bottom)
+                bottom = [bottom[i] + data[cat][i] for i in range(len(dates))]
+
+            plt.xlabel('Date')
+            plt.ylabel('Hours')
+            plt.title(f'Stacked User Activity for {user}')
+            plt.xticks(x_indexes, dates, rotation=45)
+            plt.legend()
+            plt.tight_layout()
+            plt.show()
+
+    # Ensure plotting runs in the main thread
+    root.after(0, plot_activity)
+
 def show_loading_dialog():
-    loading_dialog = tk.Toplevel(root)
+    loading_dialog = ctk.CTkToplevel(root)
+    center_window(loading_dialog, root)
     loading_dialog.geometry("300x100")
     loading_dialog.title("Loading")
-    label = ctk.CTkLabel(loading_dialog, text="Loading, please wait...", font=("Helvetica", 14))
+    label = ctk.CTkLabel(loading_dialog, text="Analysing, please wait...", font=("Helvetica", 14))
     label.pack(expand=True)
 
+    loading_dialog.transient(root)  # Make the loading dialog modal
+    loading_dialog.grab_set()  # Prevent interaction with the main window
+    loading_dialog.protocol("WM_DELETE_WINDOW", lambda: None)  # Disable closing the dialog
+
+    
+    loading_dialog.lift()  # Bring the dialog to the front
+    loading_dialog.focus_force()  # Ensure the dialog gets focus
+
     return loading_dialog
+
 
 # Function to process files in a background thread
 def process_files_in_background(files):
     global loading_dialog
 
-    # Show loading dialog
     loading_dialog = show_loading_dialog()
-
     try:
         dataframes = [read_evtx([file]) for file in files]
+        if any(df is None for df in dataframes):
+            messagebox.showerror("Error", "Empty or corrupted file detected.")
+            return
+       
+            # Show loading dialog
+        
         combined_df = pd.concat(dataframes, ignore_index=True)
         df = preprocess_logs(combined_df)
 
@@ -225,15 +260,28 @@ def process_files_in_background(files):
         activity_data = process_logs(df)
         activity_summary = calculate_activity(activity_data)
         display_activity(activity_summary)
+
     except Exception as e:
-        print(f"Error processing files: {e}")
-    finally:
-        # Hide loading label after processing
+        print(f"Error processing files damn: {e}")
         loading_dialog.destroy()
+        messagebox.showerror("Error", "Something went wrong.")
+
+    finally:
+        file_label.configure(text="")
+        # Hide loading dialog after processing (whether successful or not)
+        if loading_dialog:
+            loading_dialog.destroy()
+
 
 # Function to open files and process logs
 def open_files():
+    
+    root.update_idletasks()  # Process pending events, including GUI updates
     files = filedialog.askopenfilenames(filetypes=[("EVTX files", "*.evtx")])
+
+    if not files:
+        # User canceled file selection
+        return
 
     if len(files) > 3:
         messagebox.showerror("Error", "Please select a maximum of 3 files.")
@@ -247,15 +295,31 @@ def open_files():
         threading.Thread(target=process_files_in_background, args=(files,)).start()
 
 
+def center_window(window, parent=None):
+    window.update_idletasks()
+    screen_width = window.winfo_screenwidth()
+    screen_height = window.winfo_screenheight()
+    size = tuple(int(_) for _ in window.geometry().split('+')[0].split('x'))
+    if parent:
+        parent.update_idletasks()
+        x = parent.winfo_x() + parent.winfo_width() // 2 - size[0] // 2
+        y = parent.winfo_y() + parent.winfo_height() // 2 - size[1] // 2
+    else:
+        x = screen_width // 2 - size[0] // 2
+        y = screen_height // 2 - size[1] // 2
+    window.geometry(f"{size[0]}x{size[1]}+{x}+{y}")
+
 # Setting up the GUI
 def cancel_action():
     root.destroy()
 
 # Initialize the main window
 root = ctk.CTk()
-root.geometry("800x500")
+root.geometry("800x500+{}+{}".format(root.winfo_screenwidth()//2 - 400, root.winfo_screenheight()//2 - 250))
 ctk.set_appearance_mode("light")
 root.title("Activity Analyser")
+
+
 
 # Create and place widgets
 title_label = ctk.CTkLabel(root, text="User Activity Analyser", font=("Helvetica", 20))
@@ -268,8 +332,17 @@ canvas = Canvas(canvas_frame, width=500, height=270, highlightthickness=1)
 canvas.pack()
 canvas.create_rectangle(5, 5, 495, 265, outline="#A9A9A9", dash=(5, 5))  # Dashed border
 
+
+# Determine if the application is packaged (running from PyInstaller executable)
+if getattr(sys, 'frozen', False):
+    # Running in a PyInstaller bundle
+    icon_path = os.path.join(sys._MEIPASS, "upload_file_icon.png")
+else:
+    # Running in a normal Python environment
+    icon_path = "upload_file_icon.png"
+
 # Upload icon
-upload_icon = PhotoImage(file="./icons/upload_file_icon.png")  # Ensure this file is in the same directory
+upload_icon = PhotoImage(file=icon_path) 
 upload_icon = upload_icon.subsample(6, 6)
 
 # Place the upload icon and text in the canvas
